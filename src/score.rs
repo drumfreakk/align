@@ -1,11 +1,8 @@
 use std::string::String;
 use std::collections::HashMap;
+use crate::util::get_known_index;
 
 pub type Scores = HashMap<char, HashMap<char, i8>>;
-
-fn get_known_index(s: &str, i: usize) -> char {
-    s.chars().nth(i).expect("Invalid index")
-}
 
 pub fn init_scores(classes: &[String], scores_array: &[[i8; 5]], score_same: i8, score_cys: i8, score_gap_start: i8, score_gap_extend: i8) -> Scores {
     let mut scores = HashMap::new();
@@ -53,7 +50,7 @@ fn check_gap(seq: &str, index: usize, gap: &mut bool) -> char {
     aa
 }
 
-pub fn score_subs(scores: &Scores, seq1: &str, seq2: &str) -> Result<i8, String>  {
+pub fn score_subs(scores: &Scores, seq1: &str, seq2: &str) -> Result<i8, String> {
     let mut score = 0;
     if seq1.len() != seq2.len(){
         return Err(String::from("Sequences have unequal lengths"));
