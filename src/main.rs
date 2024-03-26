@@ -11,13 +11,15 @@ fn main() {
     let seq1 = String::from("HTRANN");
     let seq2 = String::from("TRANNY");
     
-    let align = crate::align::align_seqs(&scores, &seq1, &seq2);
+    let align = crate::align::align_seqs(&scores, &seq1, &seq2, &classes);
     println!("{:#?}", &align);
 
 
     let seq1 = String::from("HGSIQVKGHL");
     let seq2 = String::from("TRASMKASELEVHGH");
     
-    let align = crate::align::align_seqs(&scores, &seq1, &seq2);
+    let align = crate::align::align_seqs(&scores, &seq1, &seq2, &classes);
     println!("{:#?}", &align);
+
+
 }
