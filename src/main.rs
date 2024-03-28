@@ -17,9 +17,23 @@ fn main() {
 
     let seq0 = String::from("TRASMKASELEVHGH");
     let seq1 = String::from("HGSIQVKGHL");
-    
     let align = crate::align::align_seqs(&scores, &seq0, &seq1, &classes);
     println!("{}", &align);
+    
 
+    let seq0 = String::from("TRASMKYSELEVHGHYMKAS");
+    let seq1 = String::from("IQVKGHLHGS");
+    let align = crate::align::align_seqs(&scores, &seq0, &seq1, &classes);
+    println!("{}", &align);
+    
+    let seq0 = String::from("TRASMKYSELEVHGHYYMKAS");
+    let seq1 = String::from("IQVKGHALHGS");
+    let align = crate::align::align_seqs(&scores, &seq0, &seq1, &classes);
+    println!("{}", &align);
+    
+    let seq0 = String::from("TRASMKASELEVHGHYYMKAS");
+    let seq1 = String::from("HGSIQVKGHALHGS");
+    let align = crate::align::align_seqs(&scores, &seq0, &seq1, &classes);
+    println!("{}", &align);
 
 }

@@ -4,22 +4,23 @@ use std::cmp::{max, min, Ordering};
 use std::fmt;
 
 use crate::score;
-use crate::util::get_known_index;
+use crate::util::known_i;
 
 pub struct Alignment {
     score: Option<i8>,
     seq: [String; 2],
+    alignments: Vec<Position>,
 }
 
 #[derive(PartialEq)]
-struct Position{
+pub struct Position{
     length: usize,
     start: [usize; 2],
     strictness: AAMatchType,
 }
 
 #[derive(PartialEq)]
-enum AAMatchType {
+pub enum AAMatchType {
     Exact,
     Class,
 }
@@ -29,8 +30,13 @@ struct AACompare {
     strictness: AAMatchType,
 }
 
+struct ExtremeFix {
+    start: usize,
+    end: usize,
+}
+
 impl Alignment {
-    fn lcs(&self, classes: Option<&[String]>) -> Vec<Position> {
+    fn lcs(&mut self, classes: Option<&[String]>) {
         let n = self.seq[0].len();
         let m = self.seq[1].len();
     
@@ -43,7 +49,7 @@ impl Alignment {
 
         for i in 0..n {
             'outer: for j in 0..m {
-                let cmp = matching_aa(get_known_index(&self.seq[0], i), get_known_index(&self.seq[1], j), classes);
+                let cmp = matching_aa(known_i(&self.seq[0], i), known_i(&self.seq[1], j), classes);
                 if cmp.equal {
                     dp[i+1][j+1] =  dp[i][j] + 1;
                     if dp[i+1][j+1] > 0 {
@@ -68,19 +74,89 @@ impl Alignment {
                 }
             }
         }
-        out.sort_unstable_by(|a,b| a.partial_cmp(b).unwrap());
-        out.reverse();
-        out
+        if out.len() == 0 {
+            self.alignments = Vec::new();
+        } else{
+            out.sort_unstable_by(|a,b| a.partial_cmp(b).unwrap());
+            out.reverse();
+            self.alignments = out;
+        }
     }
 
-    fn match_lengths(&mut self) {
-       while self.seq[0].len() != self.seq[1].len() {
-           if self.seq[0].len() < self.seq[1].len() {
-               self.seq[0].push('-');
-           } else{
-               self.seq[1].push('-');
-           }
-       }
+    fn min_pos<I>(&self, mut index: I) -> ExtremeFix
+        where I: Iterator<Item = usize>, {
+        let mut extr_i = index.next().unwrap();
+        let mut min_s = self.alignments[extr_i].start[0];
+        for i in index {
+            if min_s > self.alignments[i].start[0] {
+                min_s = self.alignments[i].start[0];
+                extr_i = i;
+            }
+        }
+        ExtremeFix{
+            start: min_s,
+            end: min_s + self.alignments[extr_i].length,
+        }
+    }
+
+    fn max_pos<I>(&self, index: I) -> ExtremeFix
+        where I: Iterator<Item = usize>, {
+        let mut max_s = 0;
+        let mut extr_l = 0;
+        for i in index {
+            //TODO is index 0 actually always the right one?
+            if max_s < self.alignments[i].start[0] {
+                max_s = self.alignments[i].start[0];
+                extr_l = self.alignments[i].length;
+            }
+        }
+        ExtremeFix{
+            start: max_s,
+            end: max_s + extr_l,
+        }
+    }
+       
+    fn match_lengths(&mut self, from_start: bool) {
+        while self.seq[0].len() != self.seq[1].len() {
+            if self.seq[0].len() < self.seq[1].len() {
+                if from_start {
+                    self.seq[0].insert(0, '-');
+                } else {
+                    self.seq[0].push('-');
+                }
+            } else{
+                if from_start {
+                    self.seq[1].insert(0,'-');
+                } else {
+                    self.seq[1].push('-');
+                }
+            } 
+        }
+        self.trim_gaps();
+    }
+
+    fn trim_gaps(&mut self) {
+        let mut to_pop = Vec::new();
+        for i in 0..min(self.seq[0].len(), self.seq[1].len()) {
+            if known_i(&self.seq[0], i) == known_i(&self.seq[1], i) && known_i(&self.seq[0], i) == '-' {
+                to_pop.push(i);
+            }
+        }
+        to_pop.reverse();
+        for p in to_pop {
+            self.seq[0].remove(p);
+            self.seq[1].remove(p);
+        }
+    }
+}
+
+impl Position {
+    fn max(&self) -> usize {
+        max(self.start[0], self.start[1])
+    }
+    
+    fn min(&self) -> usize {
+        min(self.start[0], self.start[1])
     }
 }
 
@@ -91,8 +167,8 @@ impl PartialOrd for Position {
         } else if self.length < other.length {
             return Some(Ordering::Less);
         } else {
-            let dself = max(self.start[0], self.start[1]) - min(self.start[0], self.start[1]);
-            let dother = max(other.start[0], other.start[1]) - min(other.start[0], other.start[1]);
+            let dself = self.max() - self.min();
+            let dother = other.max() - other.min();
 
             if dself < dother {
                 return Some(Ordering::Greater);
@@ -139,7 +215,12 @@ fn matching_aa(a: char, b: char, classes: Option<&[String]>) -> AACompare {
 }
 
 pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes: &[String]) -> Alignment {
-   
+  
+    for _i in 0..50 {
+        print!("-");
+    }
+    print!("\n");
+
     /* Algorithm:
      *  Find & rank matching sequences
      *      Based on length, closeness in original sequences & exactness of match
@@ -149,15 +230,14 @@ pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes:
      *  Repeat using other sequences to get alternatives?
      */
 
-    let mut to_align = Alignment{score: None, seq: [seq0.to_string(), seq1.to_string()]};
-    let substrs = to_align.lcs(Some(classes));
+    let mut to_align = Alignment{score: None, seq: [seq0.to_string(), seq1.to_string()], alignments: Vec::new()};
+    to_align.lcs(Some(classes));
     println!("{}", to_align);
-    display_pos_list(&substrs);
 
     // Align based on top sequence
     // Only creates gaps at the start & end
-    let substr = &substrs[0];
-    let offset = max(substr.start[0], substr.start[1]) - min(substr.start[0], substr.start[1]);
+    let substr = &to_align.alignments[0];
+    let offset = substr.max() - substr.min();
     for _i in 0..offset {
         if substr.start[0] < substr.start[1] {
             to_align.seq[0].insert(0, '-');
@@ -165,11 +245,73 @@ pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes:
             to_align.seq[1].insert(0, '-');
         }
     }
-    to_align.match_lengths();
+    to_align.match_lengths(false);
+    to_align.lcs(Some(classes));
 
     // Align based on next best sequence
     // Can introduce gaps
-    // TODO:
+    display_pos_list(&to_align.alignments);
+    
+    println!("{}", to_align);
+
+    for i in 1..2 {
+        println!("WORKING ON{}", i);
+        let substr = &to_align.alignments[i];
+        //TODO: do some validation that the match is good or summin
+        let keep_max = to_align.max_pos(0..i);//alignments[0].start[0];
+        let keep_min = to_align.min_pos(0..i);//alignments[0].start[0];
+        let closer_end = substr.min() + substr.length;
+        let closer_start = substr.min();
+        
+        // Check that the current substr doesn't overlap with (a?) previous one
+        if !(closer_end < keep_min.start && substr.max() >= keep_max.end) {
+
+            if keep_max.end <= closer_start {
+                // insert gap on right
+                println!("right");
+                let mut offset = closer_start - keep_max.end;
+
+                if closer_start == closer_start+offset {
+                    offset += 1;
+                }
+
+                for j in closer_start..closer_start+offset {
+                    if substr.start[0] > substr.start[1] {
+                        to_align.seq[1].insert(j, '-');
+                    } else if substr.start[0] < substr.start[1] {
+                        to_align.seq[0].insert(j, '-');
+                    }
+                }
+                to_align.match_lengths(false);
+            } else if keep_min.start > closer_end {
+                // Insert gap on the left of the reference align
+                println!("left");
+                let mut offset = keep_min.start - closer_end;
+                let start_gap = substr.max() + substr.length;
+                
+                //println!("{},{}", start_gap, offset);
+                if start_gap > keep_min.start {
+                    offset += 1;
+                }
+
+                for j in start_gap..start_gap+offset {
+                    if substr.start[0] > substr.start[1] {
+                        to_align.seq[0].insert(j, '-');
+                    } else if substr.start[0] < substr.start[1] {
+                        to_align.seq[1].insert(j, '-');
+                    }
+                }
+                to_align.match_lengths(true);
+            } else {
+                // overlap, continue
+                // TODO do things here
+                println!("middle, continue");
+            }
+            // TODO check if its better
+        }
+
+        to_align.lcs(Some(classes));
+    }
 
     to_align.score = Some(score::score_subs(scores, &to_align.seq[0], &to_align.seq[1]).unwrap());
     to_align
@@ -180,7 +322,7 @@ pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes:
 
 fn display_pos_list(pos: &Vec<Position>) {
     println!("{} matches:\nIndex\tLength\tStart0\tStart1\tStrict", pos.len());
-    for i in 0..pos.len(){
+    for i in 0..10 {//pos.len(){
         println!("{}\t{}\t{}\t{}\t{}", 
             i, 
             pos[i].length, 
@@ -199,26 +341,20 @@ impl fmt::Display for Alignment {
             Some(i) => res.push(write!(f, " (Score: {}):\n", i)),
             None    => res.push(write!(f, ":\n")),
         };
-        
-        //TODO: matching class
-        let mut matches = Vec::new();
-        for substr in self.lcs(None) {
-            if substr.start[0] == substr.start[1] {
-                matches.push(substr);
-            }
-        }
 
-        for i in 0..self.seq.len(){
-            for j in 0..self.seq[i].len(){
-                for k in 0..matches.len(){
-                    if matches[k].start[i] == j {
-                        res.push(write!(f, "\u{1b}[1m"));
-                    } 
-                    if matches[k].start[i] + matches[k].length == j {
-                        res.push(write!(f, "\u{1b}[22m"));
+        for i in 0..self.seq.len() {
+            for j in 0..self.seq[i].len() {
+                for substr in &self.alignments {
+                    if substr.start[0] == substr.start[1] {
+                        if substr.start[i] == j {
+                            res.push(write!(f, "\u{1b}[1m"));
+                        } 
+                        if substr.start[i] + substr.length == j {
+                            res.push(write!(f, "\u{1b}[22m"));
+                        }
                     }
                 }
-                res.push(write!(f, "{}", get_known_index(&self.seq[i], j)));
+                res.push(write!(f, "{}", known_i(&self.seq[i], j)));
             }
             res.push(write!(f, "\u{1b}[22m\n"));
         }
