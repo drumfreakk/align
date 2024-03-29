@@ -50,16 +50,19 @@ fn check_gap(seq: &str, index: usize, gap: &mut bool) -> char {
     aa
 }
 
-pub fn score_subs(scores: &Scores, seq1: &str, seq2: &str) -> Result<i8, String> {
+pub fn score_subs(scores: &Scores, seq0: &str, seq1: &str) -> Result<i8, String> {
     let mut score = 0;
-    if seq1.len() != seq2.len(){
+    if seq0.len() != seq1.len(){
         return Err(String::from("Sequences have unequal lengths"));
     }
     
+    let mut gap0 = false;
     let mut gap1 = false;
-    let mut gap2 = false;
-    for i in 0..seq1.len(){
-        score += scores[&check_gap(seq1, i, &mut gap1)][&check_gap(seq2, i, &mut gap2)];
+    for i in 0..seq0.len(){
+        if known_i(seq0, i) == known_i(seq1, i) && known_i(seq0, i) == '-' {
+            return Err(String::from(format!("Aligned gaps at position {}", i)));
+        }
+        score += scores[&check_gap(seq0, i, &mut gap0)][&check_gap(seq1, i, &mut gap1)];
     }
     Ok(score)
 }
