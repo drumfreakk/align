@@ -93,7 +93,7 @@ impl Alignment {
                 extr_i = i;
             }
         }
-        ExtremeFix{
+        ExtremeFix {
             start: min_s,
             end: min_s + self.alignments[extr_i].length,
         }
@@ -105,12 +105,12 @@ impl Alignment {
         let mut extr_l = 0;
         for i in index {
             //TODO is index 0 actually always the right one?
-            if max_s < self.alignments[i].start[0] {
+            if max_s < self.alignments[i].start[0] || max_s == 0 {
                 max_s = self.alignments[i].start[0];
                 extr_l = self.alignments[i].length;
             }
         }
-        ExtremeFix{
+        ExtremeFix {
             start: max_s,
             end: max_s + extr_l,
         }
@@ -146,6 +146,30 @@ impl Alignment {
         for p in to_pop {
             self.seq[0].remove(p);
             self.seq[1].remove(p);
+        }
+    }
+
+    fn score(&mut self, scores: &score::Scores) -> Result<(), String> {
+        match score::score_subs(scores, &self.seq[0], &self.seq[1]) {
+            Ok(i)   => {
+                self.score = Some(i);
+                return Ok(());
+            },
+            Err(e)  => return Err(e),
+        }
+    }
+
+
+    fn insert_gap(&mut self, on_left: bool, align_on_match: usize, pos: usize) {
+        let insert_on = match on_left {
+            true    => 0,
+            false   => 1,
+        };
+        let substr = &self.alignments[align_on_match];
+        if substr.start[0] > substr.start[1] {
+            self.seq[insert_on].insert(pos, '-');
+        } else if substr.start[0] < substr.start[1] {
+            self.seq[(insert_on+1)%2].insert(pos, '-');
         }
     }
 }
@@ -221,19 +245,11 @@ pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes:
     }
     print!("\n");
 
-    /* Algorithm:
-     *  Find & rank matching sequences
-     *      Based on length, closeness in original sequences & exactness of match
-     *  Align based on best match
-     *  Add gaps to align other sequences
-     *      Check to make sure adding a gap actually improves the score
-     *  Repeat using other sequences to get alternatives?
-     */
-
     let mut to_align = Alignment{score: None, seq: [seq0.to_string(), seq1.to_string()], alignments: Vec::new()};
     to_align.lcs(Some(classes));
     println!("{}", to_align);
 
+    //TODO put this in the middle part
     // Align based on top sequence
     // Only creates gaps at the start & end
     let substr = &to_align.alignments[0];
@@ -251,55 +267,37 @@ pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes:
     // Align based on next best sequence
     // Can introduce gaps
     display_pos_list(&to_align.alignments);
+    let _ = to_align.score(scores);
     
     println!("{}", to_align);
 
     for i in 1..2 {
         println!("WORKING ON{}", i);
         let substr = &to_align.alignments[i];
-        //TODO: do some validation that the match is good or summin
-        let keep_max = to_align.max_pos(0..i);//alignments[0].start[0];
-        let keep_min = to_align.min_pos(0..i);//alignments[0].start[0];
-        let closer_end = substr.min() + substr.length;
-        let closer_start = substr.min();
         
-        // Check that the current substr doesn't overlap with (a?) previous one
-        if !(closer_end < keep_min.start && substr.max() >= keep_max.end) {
+        let keep_min = to_align.min_pos(0..i);
+        let keep_max = to_align.max_pos(0..i);
+        let lower_start = substr.min();
+        let lower_end = substr.min() + substr.length;
+        let higher_start = substr.max();
+        let higher_end = substr.max() + substr.length;
 
-            if keep_max.end <= closer_start {
+        // Check that the current substr doesn't overlap with (a?) previous one
+        if !(lower_end < keep_min.start && substr.max() >= keep_max.end) {
+            println!("no overlap, adjusting");
+
+            if keep_max.end <= lower_start {
                 // insert gap on right
                 println!("right");
-                let mut offset = closer_start - keep_max.end;
-
-                if closer_start == closer_start+offset {
-                    offset += 1;
-                }
-
-                for j in closer_start..closer_start+offset {
-                    if substr.start[0] > substr.start[1] {
-                        to_align.seq[1].insert(j, '-');
-                    } else if substr.start[0] < substr.start[1] {
-                        to_align.seq[0].insert(j, '-');
-                    }
+                for j in lower_start..higher_start {
+                    to_align.insert_gap(false, i, j);
                 }
                 to_align.match_lengths(false);
-            } else if keep_min.start > closer_end {
+            } else if keep_min.start > lower_end {
                 // Insert gap on the left of the reference align
                 println!("left");
-                let mut offset = keep_min.start - closer_end;
-                let start_gap = substr.max() + substr.length;
-                
-                //println!("{},{}", start_gap, offset);
-                if start_gap > keep_min.start {
-                    offset += 1;
-                }
-
-                for j in start_gap..start_gap+offset {
-                    if substr.start[0] > substr.start[1] {
-                        to_align.seq[0].insert(j, '-');
-                    } else if substr.start[0] < substr.start[1] {
-                        to_align.seq[1].insert(j, '-');
-                    }
+                for _j in lower_end..higher_end {
+                    to_align.insert_gap(true, i, higher_end);
                 }
                 to_align.match_lengths(true);
             } else {
@@ -308,12 +306,17 @@ pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes:
                 println!("middle, continue");
             }
             // TODO check if its better
+        } else {
+            println!("overlap, skipping");
         }
 
         to_align.lcs(Some(classes));
+        //TODO do summin w this
+        let _ = to_align.score(scores);
+        display_pos_list(&to_align.alignments);
+        println!("{}", to_align);
     }
 
-    to_align.score = Some(score::score_subs(scores, &to_align.seq[0], &to_align.seq[1]).unwrap());
     to_align
 }
 
@@ -322,7 +325,7 @@ pub fn align_seqs(scores: &score::Scores, seq0: &String, seq1: &String, classes:
 
 fn display_pos_list(pos: &Vec<Position>) {
     println!("{} matches:\nIndex\tLength\tStart0\tStart1\tStrict", pos.len());
-    for i in 0..10 {//pos.len(){
+    for i in 0..5 {//pos.len(){
         println!("{}\t{}\t{}\t{}\t{}", 
             i, 
             pos[i].length, 
